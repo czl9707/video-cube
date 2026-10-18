@@ -3,6 +3,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createVolumeTexture } from './texture3d';
 import { CUBE_VERT, CUBE_FRAG } from './shaders';
 import { planeCubePolygon, volumeHalfExtents } from './resliceMath';
+import { rgbToHsv } from './colorKey';
+import { DEFAULT_COLOR_KEY } from './colorKey';
+import type { ColorKey } from './colorKey';
 import type { Vec3 } from './linalg';
 
 export class CubeRenderer {
@@ -12,6 +15,9 @@ export class CubeRenderer {
   private uniforms: Record<string, THREE.IUniform>;
   private line: THREE.Line;
   private linePositions: THREE.BufferAttribute;
+  private pivotLine: THREE.Line;
+  private pivotSegment: [Vec3, Vec3] | null = null;
+  private showGuides = true;
   private controls: OrbitControls;
   private box: THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>;
   private half: Vec3;
@@ -46,6 +52,13 @@ export class CubeRenderer {
       uPlaneFlip: { value: false },
       uPlaneClip: { value: true },
       uPlaneImgAlpha: { value: 1 },
+      uKeyOn: { value: false },
+      uKeyIsolate: { value: false },
+      uKeyHsv: { value: new THREE.Vector3() },
+      uKeyTol: {
+        value: new THREE.Vector3(DEFAULT_COLOR_KEY.hueTol / 360, DEFAULT_COLOR_KEY.satTol, DEFAULT_COLOR_KEY.valTol),
+      },
+      uKeySoft: { value: DEFAULT_COLOR_KEY.softness },
     };
     const mat = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
@@ -74,6 +87,14 @@ export class CubeRenderer {
     this.line.visible = false;
     this.line.renderOrder = 2; // keep the outline over the cube pass
     this.scene.add(this.line);
+
+    // Tilt pivot marker: the line on the cut face the plane rotates around.
+    const pivotGeo = new THREE.BufferGeometry();
+    pivotGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(2 * 3), 3));
+    this.pivotLine = new THREE.Line(pivotGeo, new THREE.LineBasicMaterial({ color: 0xffa630 }));
+    this.pivotLine.visible = false;
+    this.pivotLine.renderOrder = 3;
+    this.scene.add(this.pivotLine);
 
     this.resize();
   }
@@ -110,6 +131,66 @@ export class CubeRenderer {
     this.updateOutline();
   }
 
+  /** Apply (or, when disabled, clear) the viewer colour key. */
+  setColorKey(key: ColorKey): void {
+    const u = this.uniforms;
+    u.uKeyOn.value = key.enabled;
+    u.uKeyIsolate.value = key.mode === 'isolate';
+    (u.uKeyHsv.value as THREE.Vector3).set(...rgbToHsv(...key.color));
+    (u.uKeyTol.value as THREE.Vector3).set(key.hueTol / 360, key.satTol, key.valTol);
+    u.uKeySoft.value = key.softness;
+  }
+
+  /**
+   * Colour of the cut-face image under a canvas point (client pixels), read
+   * from the volume data, or null when the point misses the cut face.
+   */
+  pickPlaneColor(clientX: number, clientY: number): [number, number, number] | null {
+    const canvas = this.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const n = new THREE.Vector3(...this.plane.normal);
+    const hit = new THREE.Vector3();
+    // THREE.Plane uses n.p + constant = 0, so constant = -offset.
+    if (!ray.ray.intersectPlane(new THREE.Plane(n, -this.plane.offset), hit)) return null;
+    const [hx, hy, hz] = this.half;
+    if (Math.abs(hit.x) > hx || Math.abs(hit.y) > hy || Math.abs(hit.z) > hz) return null;
+    const img = (this.uniforms.uVolume.value as THREE.Data3DTexture).image as {
+      data: Uint8Array;
+      width: number;
+      height: number;
+      depth: number;
+    };
+    const ix = Math.min(img.width - 1, Math.floor((hit.x / (2 * hx) + 0.5) * img.width));
+    const iy = Math.min(img.height - 1, Math.floor((0.5 - hit.y / (2 * hy)) * img.height));
+    const iz = Math.min(img.depth - 1, Math.floor((hit.z / (2 * hz) + 0.5) * img.depth));
+    const o = ((iz * img.height + iy) * img.width + ix) * 4;
+    return [img.data[o] / 255, img.data[o + 1] / 255, img.data[o + 2] / 255];
+  }
+
+  /** Show the tilt pivot as a segment between two world points, or hide it with null. */
+  setPivotLine(segment: [Vec3, Vec3] | null): void {
+    this.pivotSegment = segment;
+    this.pivotLine.visible = !!segment && this.showGuides;
+    if (!segment) return;
+    const attr = this.pivotLine.geometry.getAttribute('position') as THREE.BufferAttribute;
+    (attr.array as Float32Array).set([...segment[0], ...segment[1]]);
+    attr.needsUpdate = true;
+    this.pivotLine.geometry.computeBoundingSphere();
+  }
+
+  /** Show or hide the cut-face outline and the pivot line (visual guides only). */
+  setGuidesVisible(visible: boolean): void {
+    this.showGuides = visible;
+    this.pivotLine.visible = visible && !!this.pivotSegment;
+    this.updateOutline();
+  }
+
   private updateOutline(): void {
     const { normal, offset, on } = this.plane;
     if (!on) {
@@ -117,7 +198,7 @@ export class CubeRenderer {
       return;
     }
     const poly = planeCubePolygon(normal, offset, this.half);
-    this.line.visible = poly.length >= 2;
+    this.line.visible = poly.length >= 2 && this.showGuides;
     if (poly.length >= 2) {
       const arr = this.linePositions.array as Float32Array;
       poly.forEach((p, i) => arr.set(p, i * 3));
