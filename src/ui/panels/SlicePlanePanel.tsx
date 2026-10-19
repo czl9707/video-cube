@@ -5,13 +5,11 @@ import { SidebarGroup, SidebarGroupContent, SidebarGroupLabel } from '@/componen
 import { SliderRow } from '../SliderRow';
 import type { Axis, PlaneState } from '../planeState';
 
-/** Axis preset, tilt angles, tilt pivot, position and cut-side toggles. */
+/** Axis preset, tilt angles, position and cut-side toggles. */
 export function SlicePlanePanel(props: {
   plane: PlaneState;
   /** World-space half extent of the volume along the offset axis. */
   reach: number;
-  pivot: number;
-  onPivot: (v: number) => void;
   showClipped: boolean;
   onShowClipped: (show: boolean) => void;
   showGuides: boolean;
@@ -61,20 +59,6 @@ export function SlicePlanePanel(props: {
           onValueChange={(v) => props.onRotate({ elevation: v })}
         />
         <SliderRow
-          id="pivot"
-          label="Tilt pivot"
-          unit="%"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.round(props.pivot * 100)}
-          onValueChange={(v) => props.onPivot(v / 100)}
-        />
-        <p className="-mt-1.5 text-[11px] leading-snug text-muted-foreground">
-          Line the plane tilts around: 0% top, 50% centre, 100% bottom (at azimuth 0 deg). That line keeps its moment
-          in time.
-        </p>
-        <SliderRow
           id="offset"
           label="Position"
           unit=""
@@ -107,7 +91,7 @@ export function SlicePlanePanel(props: {
             onCheckedChange={(c) => props.onShowGuides(c === true)}
           />
           <Label htmlFor="show-guides" className="text-xs">
-            Show the cut-face outline and pivot line
+            Show the cut-face outline
           </Label>
         </div>
       </SidebarGroupContent>

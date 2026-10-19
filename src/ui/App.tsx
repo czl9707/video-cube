@@ -12,7 +12,6 @@ import { cn } from '@/lib/utils';
 import { CubeRenderer } from '@/render/cubeRenderer';
 import { ingestVideo } from '@/ingest/ingestVideo';
 import { volumeHalfExtents } from '@/render/resliceMath';
-import { offsetAboutPivot, pivotSegment3D } from '@/render/tiltPivot';
 import { DEFAULT_COLOR_KEY } from '@/render/colorKey';
 import type { ColorKey } from '@/render/colorKey';
 import type { Vec3 } from '@/render/linalg';
@@ -50,8 +49,6 @@ export function App() {
   const [rate, setRate] = useState(10);
   const [rateDirty, setRateDirty] = useState(false);
   const [viewerRes, setViewerRes] = useState(512);
-  // Tilt pivot along the tilt direction: 0 = top edge, 0.5 = centre, 1 = bottom (at azimuth 0).
-  const [pivot, setPivot] = useState(0.5);
   // Bumped on every ingest so plane-overlay effects re-run for the new renderer.
   const [volumeEpoch, setVolumeEpoch] = useState(0);
   // One tool panel at a time on the right.
@@ -59,7 +56,7 @@ export function App() {
   const [colorKey, setColorKey] = useState<ColorKey>(DEFAULT_COLOR_KEY);
   // True while the eyedropper waits for a click on the cut face.
   const [picking, setPicking] = useState(false);
-  // Green cut-face outline and orange pivot line; hide them for a clean view.
+  // Green cut-face outline; hide it for a clean view.
   const [showGuides, setShowGuides] = useState(true);
   const [opacity, setOpacity] = useState(8);
   const [planeImg, setPlaneImg] = useState(100);
@@ -121,13 +118,6 @@ export function App() {
       return next === p.offset ? p : { ...p, offset: next };
     });
   }, [reach]);
-
-  // Keep the orange tilt-pivot marker on the cut face in sync.
-  useEffect(() => {
-    const plane3 = { azimuth: plane.azimuth, elevation: plane.elevation, offset: clampedOffset };
-    // Drawn 1.5% inside the frame so it stays distinguishable from the outline at 0% / 100%.
-    cubeRef.current?.setPivotLine(pivotSegment3D(plane3, half, 0.015 + pivot * 0.97));
-  }, [plane.azimuth, plane.elevation, clampedOffset, half, pivot, volumeEpoch]);
 
   // Guides visibility and the colour key; re-applied when a new volume (and renderer) is created.
   useEffect(() => {
@@ -242,20 +232,6 @@ export function App() {
     setPlaneState((p) => ({ ...p, ...partial }));
   }, []);
 
-  // Azimuth / elevation changes rotate the plane around the tilt pivot line,
-  // so the moment shown at the pivot stays put while the plane tilts.
-  const rotatePlane = useCallback(
-    (angles: { azimuth?: number; elevation?: number }) => {
-      planeTouchedRef.current = true;
-      setPlaneState((p) => {
-        const next = { azimuth: angles.azimuth ?? p.azimuth, elevation: angles.elevation ?? p.elevation };
-        const prev = { azimuth: p.azimuth, elevation: p.elevation, offset: Math.min(reach, Math.max(-reach, p.offset)) };
-        return { ...p, ...next, offset: offsetAboutPivot(prev, next, half, pivot) };
-      });
-    },
-    [half, reach, pivot],
-  );
-
   const setAxis = useCallback(
     (axis: Axis) => {
       updatePlane({
@@ -318,14 +294,12 @@ export function App() {
           <SlicePlanePanel
             plane={plane}
             reach={reach}
-            pivot={pivot}
-            onPivot={setPivot}
             showClipped={showClipped}
             onShowClipped={handleShowClipped}
             showGuides={showGuides}
             onShowGuides={setShowGuides}
             onAxis={setAxis}
-            onRotate={rotatePlane}
+            onRotate={updatePlane}
             onOffset={(v) => updatePlane({ offset: v })}
             onFlip={(flip) => updatePlane({ flip })}
           />

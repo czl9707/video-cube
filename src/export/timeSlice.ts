@@ -9,9 +9,8 @@
  * For export we describe a plane in time terms rather than 3D terms, so the
  * result does not depend on the viewer's "Spacing" setting:
  *
- *   - `time`    the moment shown at the tilt pivot (by default the centre of
- *               the frame), normalised to the clip: 0 = first frame,
- *               1 = last frame.
+ *   - `time`    the moment shown at the frame centre, normalised to the clip:
+ *               0 = first frame, 1 = last frame.
  *   - `span`    how much clip time the plane covers from one edge of the
  *               frame to the opposite edge, in the same normalised units.
  *               0 = an ordinary frame. Negative values reverse the gradient.
@@ -26,22 +25,26 @@
  *
  * R is the extent of the frame along the gradient direction, so the earliest
  * and latest moments visible in one output frame are exactly `|span|` apart.
- *
- * The tilt pivot is the line across the frame that keeps its moment while the
- * span changes, given as a fraction along the gradient direction: 0 = the edge
- * the azimuth points to (the top for azimuth 0), 0.5 = the centre, 1 = the
- * opposite edge (the bottom for azimuth 0). Internally everything is
- * converted to the centre time, which is what the renderer uses.
- *
- * The pivot geometry itself (pivot point, pivot line, offsets) lives in
- * render/tiltPivot.ts; this module handles the time model.
  */
-import type { ViewerPlane } from '@/render/tiltPivot';
-import { gradientExtent } from '@/render/tiltPivot';
 import type { Vec3 } from '@/render/linalg';
 
+const DEG = Math.PI / 180;
+
+/** A plane as the viewer describes it (degrees, world-space offset). */
+export interface ViewerPlane {
+  azimuth: number;
+  elevation: number;
+  offset: number;
+}
+
+/** Aspect-preserving frame extent along the gradient direction (R above). */
+export function gradientExtent(azimuthDeg: number, aspectX: number, aspectY: number): number {
+  const a = azimuthDeg * DEG;
+  return Math.abs(Math.sin(a)) * aspectX + Math.abs(Math.cos(a)) * aspectY;
+}
+
 export interface SliceKeyframe {
-  /** Clip time at the tilt pivot, 0..1. */
+  /** Clip time at the frame centre, 0..1. */
   time: number;
   /** Signed clip time covered edge to edge, in clip units (1 = whole clip). */
   span: number;
@@ -63,13 +66,11 @@ export interface SliceAnimation {
   end: SliceKeyframe;
   /** Easing for the tilt (span) and direction transition. Time always moves linearly. */
   easing: Easing;
-  /** Tilt pivot along the gradient direction, 0..1 (0.5 = frame centre). */
-  pivot: number;
 }
 
 /**
  * Resolved slice for one output frame. `time` is the clip time at the frame
- * centre and already includes the pivot shift.
+ * centre.
  */
 export interface SliceParams {
   time: number;
@@ -81,10 +82,7 @@ export const DEFAULT_ANIMATION: SliceAnimation = {
   start: { time: 0, span: 0, azimuth: 0 },
   end: { time: 1, span: 0, azimuth: 0 },
   easing: 'linear',
-  pivot: 0.5,
 };
-
-const DEG = Math.PI / 180;
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
@@ -102,12 +100,6 @@ export function ease(kind: Easing, t: number): number {
   }
 }
 
-/** Offset from the pivot time to the centre time:
- * centre = pivotTime + pivotShift(span, pivot). */
-export function pivotShift(span: number, pivot: number): number {
-  return span * (0.5 - pivot);
-}
-
 /** Wrap an angle into [-180, 180]. */
 export function wrapDegrees(d: number): number {
   const w = ((((d + 180) % 360) + 360) % 360) - 180;
@@ -123,7 +115,7 @@ export function sliceAt(anim: SliceAnimation, p: number): SliceParams {
   // 20deg through the wrap instead of 340deg the long way around.
   const azimuth = anim.start.azimuth + wrapDegrees(anim.end.azimuth - anim.start.azimuth) * shape;
   const time = lerp(anim.start.time, anim.end.time, t);
-  return { time: time + pivotShift(span, anim.pivot), span, azimuth };
+  return { time, span, azimuth };
 }
 
 /** Progress value for output frame `i` of `count`. */
@@ -161,12 +153,12 @@ export function sourceFrameRange(
 }
 
 /**
- * Convert the viewer's slice plane into a keyframe whose time is measured at
- * `pivot`. `half` is the world-space half extent of the volume box (see
- * volumeHalfExtents). Returns null when the plane is (almost) parallel to the
- * time axis: such a plane does not map each pixel to a single moment.
+ * Convert the viewer's slice plane into a keyframe. `half` is the world-space
+ * half extent of the volume box (see volumeHalfExtents). Returns null when the
+ * plane is (almost) parallel to the time axis: such a plane does not map each
+ * pixel to a single moment.
  */
-export function keyframeFromPlane(plane: ViewerPlane, half: Vec3, pivot = 0.5): SliceKeyframe | null {
+export function keyframeFromPlane(plane: ViewerPlane, half: Vec3): SliceKeyframe | null {
   const el = plane.elevation * DEG;
   const nz = Math.sin(el);
   if (Math.abs(nz) < 0.02) return null;
@@ -174,7 +166,7 @@ export function keyframeFromPlane(plane: ViewerPlane, half: Vec3, pivot = 0.5): 
   const time = (zc + half[2]) / (2 * half[2]);
   const R = gradientExtent(plane.azimuth, 2 * half[0], 2 * half[1]);
   const span = ((Math.cos(el) / nz) * R) / (2 * half[2]);
-  return { time: time - pivotShift(span, pivot), span, azimuth: plane.azimuth };
+  return { time, span, azimuth: plane.azimuth };
 }
 
 /**

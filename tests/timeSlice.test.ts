@@ -3,7 +3,6 @@ import {
   DEFAULT_ANIMATION,
   ease,
   sliceAt,
-  sliceTimeRange,
   sourceFrameRange,
   frameProgress,
   keyframeFromPlane,
@@ -12,7 +11,6 @@ import {
   wrapDegrees,
 } from '../src/export/timeSlice';
 import type { SliceAnimation } from '../src/export/timeSlice';
-import { offsetAboutPivot, pivotPoint } from '../src/render/tiltPivot';
 import { volumeHalfExtents } from '../src/render/resliceMath';
 
 const half = volumeHalfExtents([1920, 1080, 120], 1.3);
@@ -32,7 +30,6 @@ describe('sliceAt', () => {
       start: { time: 0.1, span: 0.2, azimuth: 30 },
       end: { time: 0.9, span: 0.6, azimuth: 70 },
       easing: 'linear',
-      pivot: 0.5,
     };
     expect(sliceAt(anim, 0)).toEqual({ time: 0.1, span: 0.2, azimuth: 30 });
     expect(sliceAt(anim, 1)).toEqual({ time: 0.9, span: 0.6, azimuth: 70 });
@@ -43,7 +40,6 @@ describe('sliceAt', () => {
       start: { time: 0, span: 0.4, azimuth: 0 },
       end: { time: 1, span: 0.4, azimuth: 0 },
       easing: 'easeInOut',
-      pivot: 0.5,
     };
     expect(sliceAt(anim, 0.5).time).toBeCloseTo(0.5);
     expect(sliceAt(anim, 0.25).time).toBeCloseTo(0.25);
@@ -54,26 +50,10 @@ describe('sliceAt', () => {
       start: { time: 0.5, span: 0.4, azimuth: -170 },
       end: { time: 0.5, span: 0.4, azimuth: 170 },
       easing: 'linear',
-      pivot: 0.5,
     };
     // +20deg through +-180, not 340deg through 0
     expect(sliceAt(anim, 0.25).azimuth).toBeCloseTo(-175);
     expect(sliceAt(anim, 0.5).azimuth).toBeCloseTo(-180);
-  });
-
-  it('shifts the centre time so the pivot moment lands on the pivot', () => {
-    // azimuth 0, pivot at the bottom edge: the centre shows half a span earlier
-    const anim: SliceAnimation = {
-      start: { time: 0.5, span: 0.4, azimuth: 0 },
-      end: { time: 0.5, span: 0.4, azimuth: 0 },
-      easing: 'linear',
-      pivot: 1,
-    };
-    const s = sliceAt(anim, 0);
-    expect(s.time).toBeCloseTo(0.3);
-    const [lo, hi] = sliceTimeRange(s);
-    expect(hi).toBeCloseTo(0.5); // bottom edge shows the pivot moment
-    expect(lo).toBeCloseTo(0.1);
   });
 
   it('default animation replays the source clip', () => {
@@ -101,7 +81,6 @@ describe('sourceFrameRange', () => {
       start: { time: 0.5, span: 0.1, azimuth: 0 },
       end: { time: 0.5, span: 0.1, azimuth: 0 },
       easing: 'linear',
-      pivot: 0.5,
     };
     const wide: SliceAnimation = { ...narrow, start: { ...narrow.start, span: 0.6 }, end: { ...narrow.end, span: 0.6 } };
     const [, bn] = sourceFrameRange(narrow, [0, 1, 2, 3, 4], 5, 10);
@@ -163,31 +142,5 @@ describe('plane <-> keyframe', () => {
   it('reports tilt in degrees', () => {
     const kf = keyframeFromPlane({ azimuth: 0, elevation: 85, offset: 0 }, half)!;
     expect(tiltDegrees(kf, half)).toBeCloseTo(5);
-  });
-
-  it('captures plane keyframes at the pivot', () => {
-    const plane = { azimuth: 0, elevation: 80, offset: 0.1 };
-    const mid = keyframeFromPlane(plane, half, 0.5)!;
-    const bottom = keyframeFromPlane(plane, half, 1)!;
-    expect(bottom.span).toBeCloseTo(mid.span);
-    expect(bottom.time).toBeCloseTo(mid.time + mid.span / 2);
-  });
-
-  it('centre pivot keeps the centre time while tilting', () => {
-    const prev = { azimuth: 0, elevation: 90, offset: 0.2 };
-    const offset = offsetAboutPivot(prev, { azimuth: 0, elevation: 75 }, half, 0.5);
-    const a = keyframeFromPlane(prev, half)!;
-    const b = keyframeFromPlane({ azimuth: 0, elevation: 75, offset }, half)!;
-    expect(b.time).toBeCloseTo(a.time);
-  });
-
-  it('pivot point stays on the plane after the offset move', () => {
-    const prev = { azimuth: 20, elevation: 85, offset: 0.12 };
-    for (const pivot of [0, 0.5, 1]) {
-      const offset = offsetAboutPivot(prev, { azimuth: 20, elevation: 70 }, half, pivot);
-      const before = pivotPoint(prev, half, pivot)!;
-      const after = pivotPoint({ azimuth: 20, elevation: 70, offset }, half, pivot)!;
-      for (let k = 0; k < 3; k++) expect(after[k]).toBeCloseTo(before[k]);
-    }
   });
 });

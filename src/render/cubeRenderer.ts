@@ -15,8 +15,6 @@ export class CubeRenderer {
   private uniforms: Record<string, THREE.IUniform>;
   private line: THREE.Line;
   private linePositions: THREE.BufferAttribute;
-  private pivotLine: THREE.Line;
-  private pivotSegment: [Vec3, Vec3] | null = null;
   private showGuides = true;
   private controls: OrbitControls;
   private box: THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>;
@@ -87,14 +85,6 @@ export class CubeRenderer {
     this.line.visible = false;
     this.line.renderOrder = 2; // keep the outline over the cube pass
     this.scene.add(this.line);
-
-    // Tilt pivot marker: the line on the cut face the plane rotates around.
-    const pivotGeo = new THREE.BufferGeometry();
-    pivotGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(2 * 3), 3));
-    this.pivotLine = new THREE.Line(pivotGeo, new THREE.LineBasicMaterial({ color: 0xffa630 }));
-    this.pivotLine.visible = false;
-    this.pivotLine.renderOrder = 3;
-    this.scene.add(this.pivotLine);
 
     this.resize();
   }
@@ -173,21 +163,9 @@ export class CubeRenderer {
     return [img.data[o] / 255, img.data[o + 1] / 255, img.data[o + 2] / 255];
   }
 
-  /** Show the tilt pivot as a segment between two world points, or hide it with null. */
-  setPivotLine(segment: [Vec3, Vec3] | null): void {
-    this.pivotSegment = segment;
-    this.pivotLine.visible = !!segment && this.showGuides;
-    if (!segment) return;
-    const attr = this.pivotLine.geometry.getAttribute('position') as THREE.BufferAttribute;
-    (attr.array as Float32Array).set([...segment[0], ...segment[1]]);
-    attr.needsUpdate = true;
-    this.pivotLine.geometry.computeBoundingSphere();
-  }
-
-  /** Show or hide the cut-face outline and the pivot line (visual guides only). */
+  /** Show or hide the cut-face outline (visual guide only). */
   setGuidesVisible(visible: boolean): void {
     this.showGuides = visible;
-    this.pivotLine.visible = visible && !!this.pivotSegment;
     this.updateOutline();
   }
 
